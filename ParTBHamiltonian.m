@@ -1,5 +1,5 @@
 classdef ParTBHamiltonian < matlab.mixin.SetGet
-    % Parametrized TB Hamiltonian
+    % Parametrized Tight-Binding Hamiltonian
     
     properties
         Hoppings % Hoppings is a nhops*3 cell array w/ each row containing
