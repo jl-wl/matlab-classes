@@ -51,7 +51,9 @@ classdef TBHamiltonian
                         error('Incompatible labels of sites!')
                     end
                 elseif isstruct(dof)
-                    if isfield(dof,'Site')
+                    if isempty(uc.Labels)
+                        h.Partition = {(1:h.NDMat).'};
+                    elseif isfield(dof,'Site')
                         labels = unique({dof.Site});
                         if ~isempty(setxor(uc.Labels,labels))
                             error('Incompatible labels of sites!')
@@ -59,9 +61,7 @@ classdef TBHamiltonian
                             h.Partition = cellfun(@(l)TBHamiltonian.findIndices(dof,'Site',l), ...
                                                   uc.Labels,'UniformOutput',false);
                         end
-                    elseif isempty(uc.Labels)
-                        h.Partition = {(1:h.NDMat).'};
-                    elseif length(uc.Labels)==1
+                    elseif isscalar(uc.Labels)
                         s = repelem(uc.Labels,h.NDMat,1);
                         [h.DoF.Site] = s{:};
                         h.Partition = {(1:h.NDMat).'};
@@ -800,7 +800,7 @@ classdef TBHamiltonian
         % ---------
         % J. C. Slater and G. F. Koster, Phys. Rev. 94, 1498 (1954).
         % R. R. Sharma, Phys. Rev. B 19, 2813 (1979).
-            if length(bond)==1 && (nargin<2 || norm(dr)==0) % onsite term
+            if isscalar(bond) && (nargin<2 || norm(dr)==0) % onsite term
                 j1 = Utility.iif(ischar(bond),Utility.orbitmap(bond),bond);
                 t = eye(2*j1+1);
                 [~, bas] = Symmetry.sph2cub(j1);

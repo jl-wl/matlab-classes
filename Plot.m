@@ -51,7 +51,7 @@ classdef Plot
             if nargin<2
                 figure, plot(es,'o')
                 return
-            elseif length(varargin)==1
+            elseif isscalar(varargin)
                 if iscell(varargin{1})
                     ks = reshape(varargin{1},[],1);
                 else
@@ -82,7 +82,7 @@ classdef Plot
         % TODO: add parameter control; customized operators
             if nargin<4
                 ks = cell(length(ns),1);
-            elseif length(varargin)==1
+            elseif isscalar(varargin)
                 if iscell(varargin{1})
                     ks = reshape(varargin{1},[],1);
                 else
@@ -1027,13 +1027,13 @@ set(f,'Visible','on');
                 xlabel(xa_sel)
                 axis tight
             case 'surf'
-                if length(ys)==1
+                if isscalar(ys)
                     warndlg('ys is singular! Change to line plot.')
                     set(0,'CurrentFigure',f)
                     plot(xs,wf,'x-')
                     xlabel(xa_sel)
                     axis tight
-                elseif length(xs)==1
+                elseif isscalar(xs)
                     warndlg('xs is singular! Change to line plot.')
                     set(0,'CurrentFigure',f)
                     plot(ys,wf,'x-')
@@ -1046,13 +1046,13 @@ set(f,'Visible','on');
                     shading interp
                 end
             case 'pcolor'
-                if length(ys)==1
+                if isscalar(ys)
                     warndlg('ys is singular! Change to line plot.')
                     set(0,'CurrentFigure',f)
                     plot(xs,wf,'x-')
                     xlabel(xa_sel)
                     axis tight
-                elseif length(xs)==1
+                elseif isscalar(xs)
                     warndlg('xs is singular! Change to line plot.')
                     set(0,'CurrentFigure',f)
                     plot(ys,wf,'x-')

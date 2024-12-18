@@ -18,6 +18,11 @@ classdef Utility
                      [0, -1i; 1i, 0], ...
                      [1, 0; 0, -1], ...
                      [1, 0; 0, 1]};
+        DiracMats = {kron([0, 1; 1, 0],[0, 1; 1, 0]), ... % alpha1
+                     kron([0, 1; 1, 0],[0, -1i; 1i, 0]), ... % alpha2
+                     kron([0, 1; 1, 0],[1, 0; 0, -1]), ... % alpha3
+                     kron([1, 0; 0, -1],[1, 0; 0, 1]), ... % beta
+                     kron([0, -1i; 1i, 0],[1, 0; 0, 1])}; % alpha123*beta
         orbitmap = containers.Map({'s', 'p', 'd', 'f'},[0, 1, 2, 3]);
         bondmap = containers.Map({'sigma', 'pi', 'delta', 'phi'},[0, 1, 2, 3]);
     end
@@ -198,7 +203,7 @@ classdef Utility
         
         function ct_string = ct
         % get current time string
-            ct_string = strrep(num2str(clock,'%02.0f'),'  ','');
+            ct_string = strrep(num2str(clock,'%02.0f'),'  ',''); %#ok<CLOCK>
         end
         
         function fileID = fopenwait(varargin)
@@ -344,12 +349,12 @@ classdef Utility
         
         function ind = findstruct(s1,s2)
             assert(isstruct(s1) && isstruct(s2), 'Inputs must be struct!')
-            if length(s1)==1
+            if isscalar(s1)
                 ind = find(arrayfun(@(s)isequal(s,s1),s2));
             else
                 ind = arrayfun(@(s)find(arrayfun(@(ss)isequal(ss,s),s2)),s1,...
                       'UniformOutput',false);
-                if all(cellfun(@(ii)length(ii)==1,ind))
+                if all(cellfun(@(ii)isscalar(ii),ind))
                     ind = cell2mat(ind);
                 end
             end

@@ -93,7 +93,7 @@ classdef UnitCell
                 ls = lens(n+1);
                 nuc0 = nuc0+1;
             end
-            if length(n)==1
+            if isscalar(n)
                 ucrs = ucrs{1};
                 labs = labs{1};
                 drs = drs{1};

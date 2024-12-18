@@ -94,7 +94,7 @@ classdef ParTBHamiltonian < matlab.mixin.SetGet
         
         function h = setPar(h, varargin)
         % convenient interface to set parameters
-            if length(varargin)==1
+            if isscalar(varargin)
                 h.set('Parameters',varargin{1});
             else
                 h.set('Parameters',varargin);
@@ -328,6 +328,11 @@ classdef ParTBHamiltonian < matlab.mixin.SetGet
                             @(a)0.5i*a,  eye(2), G(1:2);...
                             @(d) d,      [1,0], G{4};...
                             @(d)-d,      [0,1], G{4}};
+                case 'triangle' % spinless 2D
+                    dof = [];
+                    hops = {'t1',        [1, 0], 1; ...
+                            't2',        [-1,1], 1; ...
+                            't3',        [0,-1], 1};
                 otherwise
                     try
                         f = str2func(name);
