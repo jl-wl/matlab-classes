@@ -13,25 +13,42 @@ classdef BlockMBO < handle
     methods
         function op = BlockMBO(qnlab, bas, ir, ic, bm, preset)
             arguments
-                qnlab   string = []
-                bas     struct = struct([])
-                ir      double = []
-                ic      double = []
-                bm      cell = {}
+                qnlab   string = [] % quantum number labels
+                bas     struct = struct([]) % quantum number basis 
+                ir      double = [] % row indices in qn basis
+                ic      double = [] % col indices in qn basis
+                bm      cell = {} % block-matrices for each (ir, ic)
                 preset.name {mustBeMember(preset.name, ...
-                            {'cu','cd',...
+                            {'c','cu','cd',...
                              'sx','sy','sz','s0'})}
             end
             
             if isfield(preset,'name')
                 switch preset.name
-                    case 'cu' % c_{up}
-                        op.QNumLab = ["N","Sz"];
-                        op.Basis = struct('qns',[0,0; 1,1],'dim',[1; 1]);
-                        op.BlkIndr = 1;
-                        op.BlkIndc = 2;
-                        op.BlkMats = {1};
+                    case 'c' % spinless fermion
+                        op.QNumLab = "N"; 
+                        % N : particle number
+                        op.Basis = struct('qns',[0; 1],'dim',[1; 1]);
+                        % N=0 : |0> ; N=1 : |1> := c^\dag |0>
+                        % both are one-dimensional subspaces
+                        op.BlkIndr = 1; % |0>
+                        op.BlkIndc = 2; % <1|
+                        op.BlkMats = {1}; % c = |0><1|
                         op.QNIndNP = 1;
+                        % quantum number N contributes to fermion parity
+                    case 'cu' % c_{up}
+                        op.QNumLab = ["N","Sz"]; 
+                        % N : particle number
+                        % Sz: magnetic quantum number
+                        op.Basis = struct('qns',[0,0; 1,1],'dim',[1; 1]);
+                        % [0,0] : |vac>
+                        % [1,1] : |up> := c_{up}^\dag |vac>
+                        op.BlkIndr = 1; % |vac>
+                        op.BlkIndc = 2; % <up|
+                        op.BlkMats = {1};
+                        % c_{up} = |vac><up|
+                        op.QNIndNP = 1;
+                        % quantum number N contributes to fermion parity
                     case 'cd' % c_{down}
                         op.QNumLab = ["N","Sz"];
                         op.Basis = struct('qns',[0,0; 1,-1],'dim',[1; 1]);
@@ -136,7 +153,13 @@ classdef BlockMBO < handle
             l = size(op.BlkIndr,1);
         end
         
+        function d = ind2dim(op, ind)
+        % find HS dimension by index
+            d = prod(arrayfun(@(ii)op.Basis(ii).dim(ind(ii)),1:length(ind)));
+        end
+        
         function qn = ind2qn(op, ind, take_sum)
+        % find HS quantum number by index
             qn = zeros(length(ind),length(op.QNumLab));
             for ii = 1:length(ind)
                 qn(ii,:) = op.Basis(ii).qns(ind(ii),:);
@@ -147,6 +170,7 @@ classdef BlockMBO < handle
         end
         
         function qn = qnr(op, ib, take_sum)
+        % find row quantum number for ib-th index in BlkIndr
             if nargin<3
                 take_sum = false;
             end
@@ -154,6 +178,7 @@ classdef BlockMBO < handle
         end
         
         function qn = qnc(op, ib, take_sum)
+        % find col quantum number for ib-th index in BlkIndc
             if nargin<3
                 take_sum = false;
             end
@@ -312,6 +337,27 @@ classdef BlockMBO < handle
         
     % --- computational routines ---
 
+        function m = submat(op, ir, ic)
+        % extract submatrix with row/col indices given by each row of ir/ic
+            op2 = op.gather;
+            blkinds = [op2.BlkIndr,op2.BlkIndc];
+            nir = size(ir,1);
+            nic = size(ic,1);
+            ma = cell(nir,nic);
+            for iir = 1:nir
+                for iic = 1:nic
+                    in = Utility.findvec([ir(iir,:),ic(iic,:)],blkinds);
+                    if isempty(in)
+                        ma{iir,iic} = sparse(op2.ind2dim(ir(iir,:)),op2.ind2dim(ic(iic,:)));
+                    else
+                        ma{iir,iic} = op2.BlkMats{in};
+                    end
+                end
+            end
+            mr = arrayfun(@(iir)horzcat(ma{iir,:}),1:nir,'UniformOutput',false);
+            m = vertcat(mr{:});
+        end
+
         function [ens, rebas, opd, varargout] = diag(op, cutoff, varargin)
         % to diagonalize block-diagonal op with cutoff, and transform other
         % ops in varargin to the diagonalized basis
@@ -421,6 +467,19 @@ classdef BlockMBO < handle
             opP = op.id;
             qnall = arrayfun(@(ii)opP.qnr(ii,true),(1:opP.len)','UniformOutput',false);
             opP.BlkMats = cellfun(@(qn,a)(-1)^qn(indnp)*a,qnall,opP.BlkMats,'UniformOutput',false);
+        end
+
+        function [eind, oind] = pind(op)
+        % find indices for each parity sector
+            if isempty(op.QNIndNP)
+                error('parity cannot be determined')
+            end
+            bps = arrayfun(@(b)(-1).^b.qns(:,op.QNIndNP),op.Basis,'UniformOutput',false);
+            aind = Utility.ndgridVecs(ones(1,length(bps)),cellfun(@(c)length(c),bps));
+            bps = fliplr(bps);
+            aps = Utility.kronall(bps{:});
+            eind = aind(aps>0,:);
+            oind = aind(aps<0,:);
         end
         
         function ope = extend(op, opls, oprs)
@@ -588,11 +647,11 @@ classdef BlockMBO < handle
             assert(isequal(o1.QNumLab,o2.QNumLab))
             bas = [o1.Basis, o2.Basis];
             if o1.isZero || o2.isZero
-                oo = BlockMBO(o1.QNumLab, bas);
+                oo = BlockMBO(o1.QNumLab, bas, [], [], {});
                 return
             end
             
-            indnp = o1.QNIndNP; % index for fermion number of parity
+            indnp = o1.QNIndNP; % index for fermion number or parity
             if ~isempty(indnp)
                 d1 = o1.qnr(1,true)-o1.qnc(1,true);
                 d2 = o2.qnr(1,true)-o2.qnc(1,true);
@@ -652,16 +711,12 @@ classdef BlockMBO < handle
         end
         
         function opt = transpose(op)
-            opt = BlockMBO(op.QNumLab, op.Basis);
-            opt.BlkIndr = op.BlkIndc;
-            opt.BlkIndc = op.BlkIndr;
+            opt = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr);
             opt.BlkMats = cellfun(@transpose,op.BlkMats,'UniformOutput',false);
         end
         
         function opct = ctranspose(op)
-            opct = BlockMBO(op.QNumLab, op.Basis);
-            opct.BlkIndr = op.BlkIndc;
-            opct.BlkIndc = op.BlkIndr;
+            opct = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr);
             opct.BlkMats = cellfun(@ctranspose,op.BlkMats,'UniformOutput',false);
         end
 
@@ -675,7 +730,7 @@ classdef BlockMBO < handle
         end
         
         function opn = null(op)
-            opn = BlockMBO(op.QNumLab, op.Basis);
+            opn = BlockMBO(op.QNumLab, op.Basis, [], [], {});
         end
     end
     
@@ -706,7 +761,7 @@ classdef BlockMBO < handle
         %   - qn0 : (qns0={op.Basis.qns}) old QNumber basis (cell array)
         %   - ind : indices in old basis for each new QN (cell array)
         %   - dim : dimensions of original blocks corresponding to ind0 (cell array)
-            if length(bas0)==1
+            if isscalar(bas0)
 %                 warning('basis does not need to be packed')
                 rebas.qnn = bas0.qns;
                 rebas.qn0 = {bas0.qns};
@@ -788,22 +843,22 @@ classdef BlockMBO < handle
         function sv = svec(type)
             switch type
                 case 'c'
-                    cu = BlockMBO('name','cu');
-                    cd = BlockMBO('name','cd');
+                    cu = BlockMBO(name='cu');
+                    cd = BlockMBO(name='cd');
                     sv = {-cd^(cu')+cd'^cu, 1i*(cd^(cu')+(cd')^cu),...
                           cd.id^(cu'*cu)-(cd'*cd)^cu.id};
                 case 's'
-                    sv = {BlockMBO('name','sx'), BlockMBO('name','sy'),...
-                          BlockMBO('name','sz')};
+                    sv = {BlockMBO(name='sx'), BlockMBO(name='sy'),...
+                          BlockMBO(name='sz')};
             end
         end
         
         function test
-            cu = BlockMBO('name','cu');
-            cd = BlockMBO('name','cd');
-            sx = BlockMBO('name','sx');
-            sy = BlockMBO('name','sy');
-            sz = BlockMBO('name','sz');
+            cu = BlockMBO(name='cu');
+            cd = BlockMBO(name='cd');
+            sx = BlockMBO(name='sx');
+            sy = BlockMBO(name='sy');
+            sz = BlockMBO(name='sz');
             
             % test Fermion statistics
             cuex = cu.extend({cd},{});
