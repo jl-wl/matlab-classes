@@ -124,7 +124,7 @@ classdef ComputePhys
             end
 
             jall = cellfun(@jrho,rhos,'UniformOutput',false);
-            if length(jall)==1
+            if isscalar(jall)
                 corr = jall{1};
             else
                 ssp = 0.5*sum(cat(nd+1,jall{:}),nd+1);

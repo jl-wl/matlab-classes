@@ -247,16 +247,43 @@ classdef Utility
             end
 
             if nargout<2
-                varargout{1} = sort(real(feig(varargin{:})));
-            else
-                [V,D] = feig(varargin{:});
-                [D,indx] = sort(real(diag(D)));
-                varargout{1} = V(:,indx);
-                varargout{2} = D;
-                orth_err = norm(V'*V-speye(length(D)),'fro')/length(D);
-                if orth_err>1e-3
-                    warning(['Eigenvectors are not orthogonal! Error = ',num2str(orth_err)])
+                evals = feig(varargin{:});
+                if mean(abs(imag(evals)))<1e-10
+                    varargout{1} = sort(real(evals));
+                else % nonhermitian
+                    varargout{1} = sort(evals);
                 end
+            elseif nargout==2
+                [V,D] = feig(varargin{:});
+                evals = diag(D);
+                if mean(abs(imag(evals)))<1e-10
+                    [evals,indx] = sort(real(evals));
+                    dim = length(evals);
+                    orth_err = norm(V'*V-speye(dim),'fro')/dim;
+                    if orth_err>1e-3
+                        warning(['Orthogonalization Error = ',num2str(orth_err)])
+                    end
+                else % nonhermitian
+                    [evals,indx] = sort(evals);
+                end
+                varargout{1} = V(:,indx);
+                varargout{2} = evals;
+            elseif nargout==3 && ~ishermitian(varargin{1})
+                [V,D,W] = eig(varargin{:}); % A = V*D*W'
+                WV = W'*V;
+                WVd = diag(WV);
+                WVerr = norm(WV-diag(WVd));
+                if WVerr>1e-12
+                    warning(['Normalization Error(W*V) = ', num2str(WVerr)])
+                end
+                V = V*diag(1./WVd);
+                evals = diag(D);
+                [evals,indx] = sort(evals);
+                varargout{1} = V(:,indx);
+                varargout{2} = evals;
+                varargout{3} = W(:,indx);
+            else
+                [varargout{1:nargout}] = feig(varargin{:});
             end
         end
         
@@ -379,8 +406,8 @@ classdef Utility
 
             assert(ismatrix(A), 'argument must be a matrix')
             assert(size(A,1)==size(A,2), 'argument is not skew-symmetric')
-            %make sure input is skew-symmetric
-            if nargin==2
+            % make sure input is skew-symmetric
+            if nargin>1
                 A = U'*A*U;
             end
             assert(norm(A+A.','fro')<1e-14*size(A,1), 'argument does not seem skew-symmetric')
@@ -396,25 +423,21 @@ classdef Utility
             sp = 1;
             p = 1.0;
             for k = 1:2:N-2
-                %First, find the largest entry in A(k+1:N,k) and
-                %permute it to A(k+1,k)
-                [~, kp] = max(A(k+1:N, k));
+                % First, find the largest entry in A(k+1:N,k) and
+                % permute it to A(k+1,k)
+                [~, kp] = max(A(k+1:N, k),[],"ComparisonMethod","abs");
                 kp = kp + k;
 
-                %Check if we need to pivot
-                if( kp ~= k+1 )
-                    %interchange rows k+1 and kp
-                    temp = A(k+1,k:N);
-                    A(k+1,k:N) = A(kp,k:N);
-                    A(kp,k:N) = temp;
+                % Check if we need to pivot
+                if kp ~= k+1
+                    % interchange rows k+1 and kp
+                    A([k+1,kp],k:N) = A([kp,k+1],k:N);
 
-                    %Then interchange columns k+1 and kp
-                    temp = A(k:N,k+1);
-                    A(k:N,k+1) = A(k:N,kp);
-                    A(k:N,kp) = temp;
+                    % interchange columns k+1 and kp
+                    A(k:N,[k+1,kp]) = A(k:N,[kp,k+1]);
 
-                    %Every interchange gives a "-" for the determinant of the
-                    %permutation
+                    % every interchange gives a "-" for the determinant of the
+                    % permutation
                     sp = -sp;
                     p = -p;
                 end
@@ -424,12 +447,9 @@ classdef Utility
                     p = p * A(k,k+1);
                 end
 
-                %Now form the Gauss vector
-                if( A(k+1,k) ~= 0.0 )
-                    tau = A(k+2:N,k)/A(k+1,k);
-
-                    %Update the matrix block A(k+2:,k+2)
-                    A(k+2:N,k+2:N) = A(k+2:N,k+2:N) + tau*A(k+2:N,k+1).' - A(k+2:N,k+1)*tau.';
+                if A(k+1,k) ~= 0
+                    m = (A(k+2:N,k)/A(k+1,k))*A(k+2:N,k+1).';
+                    A(k+2:N,k+2:N) = A(k+2:N,k+2:N) + m - m.';
                 end
             end
 

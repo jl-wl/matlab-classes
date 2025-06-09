@@ -94,6 +94,7 @@ classdef TBHamiltonian
         
         function [pos, part] = getPosition(h, ucrs, frac_coordinates)
         % positions and partitions for all sites
+        % position starts from 0 by default
             if nargin<3
                 frac_coordinates = true; % fractional by default!
             end
@@ -202,6 +203,19 @@ classdef TBHamiltonian
                 = HR0(sub2ind([dH0,dH0],repmat(part0{r0},lp0(c0),1),...
                                         repelem(part0{c0},lp0(r0),1)),...
                       iR0);
+            end
+        end
+
+        function hh = hc(h)
+            hh = h;
+            nR = size(hh.Vectors,1);
+            if nR>0
+                hh.Vectors = -hh.Vectors;
+                d = sqrt(size(hh.Matrices,1));
+                for iR = 1:nR
+                    m = reshape(hh.Matrices(:,iR),d,d);
+                    hh.Matrices(:,iR) = reshape(m',[],1);
+                end
             end
         end
  
@@ -573,6 +587,89 @@ classdef TBHamiltonian
             end
             gf = gf/size(dks,1);
         end
+
+        function [h0, v, maxRa, pos, part, dof] = principalLayer(h, varargin)
+        % Hamiltonian of intra (h0) and inter (v) principal layers.
+        % Accept two types of inputs: (h, ia, k) or (h, latps)
+        % If (as in old version) input is (h, ia, k), then
+        %   ia (s=sign(ia)) is the axis perp to which layers are defined,
+        %   k is the momentum (in units of 2pi/a) parallel to the layers.
+        %   Note that dim(k) = dim(R).
+        % If input is (h, latps), then for values in latps.ns,
+        %   0 means infinite,
+        %   -1 means semi-infinite in positive direction (s=+1),
+        %   -2 means semi-infinite in negative direction (s=-1),
+        %   there is one and only one negative value in latps.ns.
+        % In output, v is from i-th principal layer to (i+s)-th
+            Rs = h.Vectors;
+            nd = h.NDims;
+            nR = h.NVecs;
+            
+            if nargin==2
+                latps = varargin{1};
+                ns = latps.ns;
+                if nnz(ns==-1 | ns==-2)~=1
+                    error('Invalid setting in latps.ns!')
+                end
+                ia = find(ns<0,1);
+                switch ns(ia)
+                    case -1
+                        s = 1; % direction of semi-infinity
+                    case -2
+                        s = -1;
+                    otherwise
+                        error('Invalid setting in latps.ns!')
+                end
+                if ~isfield(latps,'ks')
+                    latps.ks = zeros(1,nd);
+                end
+            elseif nargin==3
+                latps.ns = zeros(1,nd); % all dimensions are infinite except for ia 
+                latps.ks = varargin{2};
+                ia = varargin{1};
+                s = sign(ia); % direction of semi-infinity
+                ia = abs(ia);
+            else
+                error('Invalid input!')
+            end
+            latps.ks(ia) = 0; % ignore momentum along ia-th dim
+            
+            [Ra, ind] = sort(Rs(:,ia));
+            step = find(Ra(2:end)-Ra(1:end-1)>0.01);
+            rdist = diff([0;step;nR]);
+            cRs = mat2cell(Rs(ind,:),rdist); % each cell contains the same Rs(:,ia)
+            maxRa = abs(cRs{1}(1,ia));
+            
+            latps.ns(ia) = 2*maxRa;
+            latps.frac = true;
+            [ham, pos, part, dof] = h.onLattice(latps);
+            
+            ind1 = cat(1,part{pos(:,ia)>=maxRa});
+            ind0 = find(pos(:,ia)<maxRa);
+            pos = pos(ind0,:);
+            part = part(ind0);
+            ind0 = cat(1,part{:});
+            if 2*length(ind0)~=size(ham,1)
+                error('Error extracting site indices of principal layer!')
+            end       
+
+            h0 = ham(ind0,ind0);
+            if norm(ham(ind1,ind0)-ham(ind0,ind1)','fro')/nnz(ham(ind1,ind0))<1e-10 % hermitian case
+                if s>0
+                    v = ham(ind1,ind0);
+                else
+                    v = ham(ind0,ind1);
+                end
+            else % non-hermitian case
+                if s>0
+                    v = {ham(ind1,ind0), ham(ind0,ind1)};
+                else
+                    v = {ham(ind0,ind1), ham(ind1,ind0)};
+                end
+            end
+            dof = dof(ind0);
+        end
+
     end
     
     methods (Access=private, Hidden=true)
@@ -696,79 +793,6 @@ classdef TBHamiltonian
             end
         end
 
-        function [h0, v, maxRa, pos, part, dof] = principalLayer(h, varargin)
-        % Hamiltonian of intra (h0) and inter (v) principal layers.
-        % Accept two types of inputs: (h, ia, k) or (h, latps)
-        % If (as in old version) input is (h, ia, k), then
-        %   ia (s=sign(ia)) is the axis perp to which layers are defined,
-        %   k is the momentum (in units of 2pi/a) parallel to the layers.
-        %   Note that dim(k) = dim(R).
-        % If input is (h, latps), then for values in latps.ns,
-        %   0 means infinite,
-        %   -1 means semi-infinite in positive direction (s=+1),
-        %   -2 means semi-infinite in negative direction (s=-1),
-        %   there is one and only one negative value in latps.ns.
-        % In output, v is from i-th principal layer to (i+s)-th
-            Rs = h.Vectors;
-            nd = h.NDims;
-            nR = h.NVecs;
-            
-            if nargin==2
-                latps = varargin{1};
-                ns = latps.ns;
-                if nnz(ns==-1 | ns==-2)~=1
-                    error('Invalid setting in latps.ns!')
-                end
-                ia = find(ns<0,1);
-                switch ns(ia)
-                    case -1
-                        s = 1; % direction of semi-infinity
-                    case -2
-                        s = -1;
-                    otherwise
-                        error('Invalid setting in latps.ns!')
-                end
-                if ~isfield(latps,'ks')
-                    latps.ks = zeros(1,nd);
-                end
-            elseif nargin==3
-                latps.ns = zeros(1,nd); % all dimensions are infinite except for ia 
-                latps.ks = varargin{2};
-                ia = varargin{1};
-                s = sign(ia); % direction of semi-infinity
-                ia = abs(ia);
-            else
-                error('Invalid input!')
-            end
-            latps.ks(ia) = 0; % ignore momentum along ia-th dim
-            
-            [Ra, ind] = sort(Rs(:,ia));
-            step = find(Ra(2:end)-Ra(1:end-1)>0.01);
-            rdist = diff([0;step;nR]);
-            cRs = mat2cell(Rs(ind,:),rdist); % each cell contains the same Rs(:,ia)
-            maxRa = abs(cRs{1}(1,ia));
-            
-            latps.ns(ia) = 2*maxRa;
-            latps.frac = true;
-            [ham, pos, part, dof] = h.onLattice(latps);
-            
-            ind1 = cat(1,part{pos(:,ia)>=maxRa});
-            ind0 = find(pos(:,ia)<maxRa);
-            pos = pos(ind0,:);
-            part = part(ind0);
-            ind0 = cat(1,part{:});
-            if 2*length(ind0)~=size(ham,1)
-                error('Error extracting site indices of principal layer!')
-            end       
-
-            h0 = ham(ind0,ind0);
-            if s>0
-                v = ham(ind1,ind0);
-            else
-                v = ham(ind0,ind1);
-            end
-            dof = dof(ind0);
-        end
     end
     
     methods (Static)

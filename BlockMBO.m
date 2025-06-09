@@ -7,19 +7,20 @@ classdef BlockMBO < handle
         BlkIndr % block row indices (integer array)
         BlkIndc % block column indices (integer array)
         BlkMats % block matrices (cell array)
-        QNIndNP % index in QN for fermion number of parity (integer)
+        QNIndNP % index in QN for fermion number or parity (integer)
     end
     
     methods
-        function op = BlockMBO(qnlab, bas, ir, ic, bm, preset)
+        function op = BlockMBO(qnlab, bas, ir, ic, bm, indp, preset)
             arguments
                 qnlab   string = [] % quantum number labels
                 bas     struct = struct([]) % quantum number basis 
                 ir      double = [] % row indices in qn basis
                 ic      double = [] % col indices in qn basis
                 bm      cell = {} % block-matrices for each (ir, ic)
+                indp    double = [] % index in qn for fermion number/parity
                 preset.name {mustBeMember(preset.name, ...
-                            {'c','cu','cd',...
+                            {'c','cu','cd','m1','m2',...
                              'sx','sy','sz','s0'})}
             end
             
@@ -55,6 +56,23 @@ classdef BlockMBO < handle
                         op.BlkIndr = 1;
                         op.BlkIndc = 2;
                         op.BlkMats = {1};
+                        op.QNIndNP = 1;
+                    case 'm1' % majorana_1
+                        op.QNumLab = "P";
+                        % P : parity
+                        op.Basis = struct('qns',[0; 1],'dim',[1; 1]);
+                        % P=0 : |0> ; P=1 : |1> := 1/sqrt(2) (m1+i*m2) |0>
+                        op.BlkIndr = [1; 2];
+                        op.BlkIndc = [2; 1];
+                        op.BlkMats = {1/sqrt(2); 1/sqrt(2)};
+                        op.QNIndNP = 1;
+                    case 'm2' % majorana_2
+                        op.QNumLab = "P";
+                        op.Basis = struct('qns',[0; 1],'dim',[1; 1]);
+                        % P=0 : |0> ; P=1 : |1> := 1/sqrt(2) (m1+i*m2) |0>
+                        op.BlkIndr = [1; 2];
+                        op.BlkIndc = [2; 1];
+                        op.BlkMats = {1i/sqrt(2); -1i/sqrt(2)};
                         op.QNIndNP = 1;
                     case 'sx'
                         op.QNumLab = ["N","Sz"];
@@ -124,7 +142,10 @@ classdef BlockMBO < handle
             end
             op.BlkMats = reshape(bm,[],1);
             
-            op.QNIndNP = find(matches(op.QNumLab,["N","P"],'IgnoreCase',true),1);
+            if nargin<6
+                indp = find(matches(op.QNumLab,["N","P"],'IgnoreCase',true),1);
+            end
+            op.QNIndNP = indp;
         end
         
         function op = addBlock(op, ir, ic, bm) % caution: NOT efficient
@@ -187,7 +208,7 @@ classdef BlockMBO < handle
         
         function tf = isFermion(op)
             tf = false;
-            indnp = op.QNIndNP; % index for fermion number of parity
+            indnp = op.QNIndNP; % index for fermion number or parity
             if ~isempty(indnp)
                 d = op.qnr(1,true)-op.qnc(1,true);
                 if mod(d(indnp),2)
@@ -212,6 +233,7 @@ classdef BlockMBO < handle
         end
         
         function tf = isDiagonal(op, drop0)
+        % to check if op is block-diagonal
         % drop0 is a flag to drop all-zero blocks:
         % if drop0==1, drop only off-diagonal ones
         % if drop0==2, drop both diagonal and off-diagonal ones
@@ -219,9 +241,10 @@ classdef BlockMBO < handle
             len = op.len;
             keeplist = true(len,1);
             tf = true;
+            tol = 1e-12;
             for ii = 1:len
                 if ~isequal(op.BlkIndr(ii,:),op.BlkIndc(ii,:))
-                    if norm(op.BlkMats{ii},'fro')>1e-15
+                    if normest(op.BlkMats{ii})>tol
                         tf = false;
                         return
                     else
@@ -230,7 +253,7 @@ classdef BlockMBO < handle
                         end
                     end
                 else
-                    if norm(op.BlkMats{ii},'fro')<1e-15 && nargin>1 && drop0>1
+                    if normest(op.BlkMats{ii})<tol && nargin>1 && drop0>1
                         keeplist(ii) = false;
                     end
                 end
@@ -332,7 +355,7 @@ classdef BlockMBO < handle
             
             keepblk = ~cellfun(@isempty,bmn);
             [basn, irn, icn] = BlockMBO.transformBas(rebas, ir(keepblk), ic(keepblk));
-            opn = BlockMBO(op.QNumLab, basn, irn, icn, bmn(keepblk)).gather;
+            opn = BlockMBO(op.QNumLab, basn, irn, icn, bmn(keepblk), op.QNIndNP).gather;
         end
         
     % --- computational routines ---
@@ -341,6 +364,10 @@ classdef BlockMBO < handle
         % extract submatrix with row/col indices given by each row of ir/ic
             op2 = op.gather;
             blkinds = [op2.BlkIndr,op2.BlkIndc];
+            if nargin==1 % full matrix if no ir/ic provided
+                ir = BlockMBO.allBlocks(op.Basis);
+                ic = ir;
+            end
             nir = size(ir,1);
             nic = size(ic,1);
             ma = cell(nir,nic);
@@ -456,11 +483,12 @@ classdef BlockMBO < handle
         function opeye = id(op) % identity operator
             [inda, dima] = BlockMBO.allBlocks(op.Basis);
             opeye = BlockMBO(op.QNumLab, op.Basis, inda, inda,...
-                        arrayfun(@(d)speye(d),dima,'UniformOutput',false));
+                        arrayfun(@(d)speye(d),dima,'UniformOutput',false),...
+                        op.QNIndNP);
         end
         
         function opP = P(op) % fermion parity operator
-            indnp = op.QNIndNP; % index for fermion number of parity
+            indnp = op.QNIndNP; % index for fermion number or parity
             if isempty(indnp)
                 error('parity cannot be determined')
             end
@@ -474,10 +502,10 @@ classdef BlockMBO < handle
             if isempty(op.QNIndNP)
                 error('parity cannot be determined')
             end
-            bps = arrayfun(@(b)(-1).^b.qns(:,op.QNIndNP),op.Basis,'UniformOutput',false);
-            aind = Utility.ndgridVecs(ones(1,length(bps)),cellfun(@(c)length(c),bps));
-            bps = fliplr(bps);
-            aps = Utility.kronall(bps{:});
+            bps = arrayfun(@(b)(-1).^b.qns(:,op.QNIndNP),op.Basis,'UniformOutput',false); % basis-wise parity
+            aind = Utility.ndgridVecs(ones(1,length(bps)),cellfun(@(c)length(c),bps)); % all indices
+            bps = fliplr(bps); % reverse order to be consistent with kron
+            aps = Utility.kronall(bps{:}); % full-basis parity
             eind = aind(aps>0,:);
             oind = aind(aps<0,:);
         end
@@ -537,15 +565,17 @@ classdef BlockMBO < handle
                         bms{ii} = func(bm0);
                     end
                 end
-                opn = BlockMBO(op.QNumLab, op.Basis, inda, inda, bms);
+                opn = BlockMBO(op.QNumLab, op.Basis, inda, inda, bms, op.QNIndNP);
             else
                 op.gather;
                 if nargin(func)==3
-                    opn = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc, ...
-                        cellfun(func,op.BlkMats,num2cell(op.BlkIndr,2),num2cell(op.BlkIndc,2),'UniformOutput',false));
+                    opn = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc,...
+                        cellfun(func,op.BlkMats,num2cell(op.BlkIndr,2),num2cell(op.BlkIndc,2),'UniformOutput',false),...
+                        op.QNIndNP);
                 else
-                    opn = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc, ...
-                        cellfun(func,op.BlkMats,'UniformOutput',false));
+                    opn = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc,...
+                        cellfun(func,op.BlkMats,'UniformOutput',false),...
+                        op.QNIndNP);
                 end
             end
             opn.checkDims
@@ -582,19 +612,19 @@ classdef BlockMBO < handle
                     end
                 end
             end
-            p = BlockMBO(o1.QNumLab, o1.Basis, ir(1:count,:), ic(1:count,:), bms(1:count));
+            p = BlockMBO(o1.QNumLab, o1.Basis, ir(1:count,:), ic(1:count,:), bms(1:count), o1.QNIndNP);
             p.gather;
         end
 
         function p = mtimes(o1, o2)
         % product of operators in same HS, including number*operator
             if isnumeric(o1)
-                p = BlockMBO(o2.QNumLab, o2.Basis, o2.BlkIndr, o2.BlkIndc, ...
-                    cellfun(@(a)o1*a,o2.BlkMats,'UniformOutput',false));
+                p = BlockMBO(o2.QNumLab, o2.Basis, o2.BlkIndr, o2.BlkIndc,...
+                    cellfun(@(a)o1*a,o2.BlkMats,'UniformOutput',false), o2.QNIndNP);
                 return
             elseif isnumeric(o2)
-                p = BlockMBO(o1.QNumLab, o1.Basis, o1.BlkIndr, o1.BlkIndc, ...
-                    cellfun(@(a)o2*a,o1.BlkMats,'UniformOutput',false));
+                p = BlockMBO(o1.QNumLab, o1.Basis, o1.BlkIndr, o1.BlkIndc,...
+                    cellfun(@(a)o2*a,o1.BlkMats,'UniformOutput',false), o1.QNIndNP);
                 return
             end
             
@@ -619,7 +649,7 @@ classdef BlockMBO < handle
                     end
                 end
             end
-            p = BlockMBO(o1.QNumLab, o1.Basis, ir(1:count,:), ic(1:count,:), bms(1:count));
+            p = BlockMBO(o1.QNumLab, o1.Basis, ir(1:count,:), ic(1:count,:), bms(1:count), o1.QNIndNP);
             p.gather;
         end
             
@@ -632,8 +662,8 @@ classdef BlockMBO < handle
                 if ~o2.isDiagonal(1)
                     error('operator must be block-diagonal!')
                 end
-                oo = BlockMBO(o2.QNumLab, o2.Basis, o2.BlkIndr, o2.BlkIndc, ...
-                    cellfun(@(a)a^o1,o2.BlkMats,'UniformOutput',false));
+                oo = BlockMBO(o2.QNumLab, o2.Basis, o2.BlkIndr, o2.BlkIndc,...
+                    cellfun(@(a)a^o1,o2.BlkMats,'UniformOutput',false), o2.QNIndNP);
                 return
             elseif isnumeric(o2)
                 if ~o1.isDiagonal(1)
@@ -647,7 +677,7 @@ classdef BlockMBO < handle
             assert(isequal(o1.QNumLab,o2.QNumLab))
             bas = [o1.Basis, o2.Basis];
             if o1.isZero || o2.isZero
-                oo = BlockMBO(o1.QNumLab, bas, [], [], {});
+                oo = BlockMBO(o1.QNumLab, bas, [], [], {}, o1.QNIndNP);
                 return
             end
             
@@ -680,7 +710,7 @@ classdef BlockMBO < handle
                     bms{count} = bm;
                 end
             end
-            oo = BlockMBO(o1.QNumLab, bas, ir, ic, bms);
+            oo = BlockMBO(o1.QNumLab, bas, ir, ic, bms, o1.QNIndNP);
         end
         
         function opn = expm(op)
@@ -693,7 +723,8 @@ classdef BlockMBO < handle
             s = BlockMBO(o1.QNumLab, o1.Basis,...
                          [o1.BlkIndr; o2.BlkIndr],...
                          [o1.BlkIndc; o2.BlkIndc],...
-                         [o1.BlkMats; o2.BlkMats]);
+                         [o1.BlkMats; o2.BlkMats],...
+                         o1.QNIndNP);
             s.gather;
         end
         
@@ -702,8 +733,9 @@ classdef BlockMBO < handle
         end
         
         function mop = uminus(op)
-            mop = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc, ...
-                cellfun(@(a)-a,op.BlkMats,'UniformOutput',false));
+            mop = BlockMBO(op.QNumLab, op.Basis, op.BlkIndr, op.BlkIndc,...
+                cellfun(@(a)-a,op.BlkMats,'UniformOutput',false),...
+                op.QNIndNP);
         end
         
         function d = minus(o1, o2)
@@ -711,13 +743,15 @@ classdef BlockMBO < handle
         end
         
         function opt = transpose(op)
-            opt = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr);
-            opt.BlkMats = cellfun(@transpose,op.BlkMats,'UniformOutput',false);
+            opt = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr,...
+                cellfun(@transpose,op.BlkMats,'UniformOutput',false),...
+                op.QNIndNP);
         end
         
         function opct = ctranspose(op)
-            opct = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr);
-            opct.BlkMats = cellfun(@ctranspose,op.BlkMats,'UniformOutput',false);
+            opct = BlockMBO(op.QNumLab, op.Basis, op.BlkIndc, op.BlkIndr,...
+                cellfun(@ctranspose,op.BlkMats,'UniformOutput',false),...
+                op.QNIndNP);
         end
 
         function t = trace(op)
@@ -730,7 +764,7 @@ classdef BlockMBO < handle
         end
         
         function opn = null(op)
-            opn = BlockMBO(op.QNumLab, op.Basis, [], [], {});
+            opn = BlockMBO(op.QNumLab, op.Basis, [], [], {}, op.QNIndNP);
         end
     end
     
@@ -771,11 +805,12 @@ classdef BlockMBO < handle
             end
             
             [inda, dima, qnsa] = BlockMBO.allBlocks(bas0);
-                    
-            [qnn, ~, indn] = unique(sum(qnsa,3),'rows');
-            if nargin>1 && ~isempty(indp)
+
+            qnn = sum(qnsa,3);
+            if nargin>1 && ~isempty(indp) % take parity instead of sum
                 qnn(:,indp) = mod(qnn(:,indp),2);
             end
+            [qnn, ~, indn] = unique(qnn,'rows');
 
             rebas.qnn = qnn;
             rebas.qn0 = {bas0.qns};
