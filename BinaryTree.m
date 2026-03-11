@@ -140,6 +140,14 @@ classdef BinaryTree < handle
                 s = "(" + t.Left.par(fstr) + "," + t.Right.par(fstr) + ")";
             end
         end
+
+        function s = parfull(t, fstr) % par w/ internal data listed behind
+            if nargin<2
+                fstr = @string;
+            end
+            s = t.par(fstr);
+            s = s + join(cellfun(@(in)fstr(in.Data), t.inodes));
+        end
     end
 
     methods(Static)
@@ -181,7 +189,7 @@ classdef BinaryTree < handle
             if nargin<2
                 fa = @str2num;
             end
-            if ~startsWith(par,"(") || ~endsWith(par,")") % leaf
+            if ~startsWith(par,"(") % leaf
                 t = BinaryTree(fa(par));
                 return
             end
@@ -191,14 +199,14 @@ classdef BinaryTree < handle
             t = BinaryTree([], BinaryTree.genByPar(pl), BinaryTree.genByPar(pr));
         end
 
-        function s = initPar(w) % initial config string like (((,),),)
+        function s = initPar(w) % initial pattern like (((,),),)
             s = "";
             for ii = 2:w
                 s = "(" + s + ",)";
             end
         end
 
-        function ss = allPar(w) % all config strings with w leaves
+        function ss = allPar(w) % all patterns with w leaves
             if w==1
                 ss = "";
                 return
@@ -210,7 +218,7 @@ classdef BinaryTree < handle
                     [], 1)); % output string array in column
         end
 
-        function s = dataPar(par, data, fstr) % insert data to string
+        function s = dataPar(par, data, fstr) % insert data to par
             m = BinaryTree.matchPar(par);
             if length(data)~=size(m,2)+1
                 error('Length does not match!')
@@ -222,6 +230,14 @@ classdef BinaryTree < handle
                 data = num2cell(data);
             end
             s = BinaryTree.genByPar(par).setLeaves(data).par(fstr);
+        end
+
+        function d = extractData(par, fa) % extract data from par
+            par = string(par);
+            if nargin<2
+                fa = @str2num;
+            end
+            d = arrayfun(fa, extract(par,regexpPattern('[^(,)]')));
         end
 
         function as = findAncs(par, n) % ancestors of n-th (

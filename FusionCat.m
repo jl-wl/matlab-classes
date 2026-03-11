@@ -4,8 +4,8 @@ classdef FusionCat
     properties
         SimpleObjs % struct array; first is always tensor unit
         NSimpleObjs
-        FusionRules
-        Associators
+        FusionRules % (a, b, ab)
+        Associators % (a, b, c, abc, bc, ab)
     end
 
     methods
@@ -13,7 +13,7 @@ classdef FusionCat
             arguments
                 sobjs       struct = struct('label','1','PFdim',1)
                 rules       double = 1
-                assos       cell = {1}
+                assos       double = 1
                 preset.name {mustBeMember(preset.name, ...
                             {'tc','fib','is'})}
             end
@@ -58,26 +58,37 @@ classdef FusionCat
         end
 
         function assos = convertAssos(C, ca)
+        % To convert associators from input format (cell array of 5 cols)
+        % into storage format (double array of 6 dimensions)
             nobj = C.NSimpleObjs;
-            assos = cell(nobj,nobj,nobj,nobj);
+            assos = zeros(nobj,nobj,nobj,nobj,nobj,nobj);
             iis = Utility.cartprod(1:nobj,1:nobj,1:nobj);
             for ii = num2cell(iis.')
-                outs = cellfun(@(t)t.Data, C.fuse(BinaryTree.dataPar('((,),)',ii)));
-                dims = arrayfun(@(ii)nnz(outs==ii), 1:nobj);
+                p0 = BinaryTree.dataPar('((,),)',ii);
+                pn = BinaryTree.assoMove(p0, 1);
+                t0s = C.fuse(p0);
+                tns = C.fuse(pn);
+                out0s = cellfun(@(t)t.Data, t0s);
+                outns = cellfun(@(t)t.Data, tns);
+                if ~isequal(sort(out0s),sort(outns))
+                    error('Inconsistent fusion rules!')
+                end
                 for io = 1:nobj
-                    if dims(io)==0
+                    iabs = sort(cellfun(@(t)t.Left.Data, t0s(out0s==io)));
+                    if isempty(iabs) % no fusion channel
                         continue
                     end
-                    if isempty(ca)
-                        indc = [];
-                    else
-                        indc = Utility.findvec([ii{:},io], cell2mat(ca(:,1:4)));
+                    ibcs = sort(cellfun(@(t)t.Right.Data, tns(outns==io)));
+                    if ~isempty(ca)
+                        ind = Utility.findvec([ii{:},io], cell2mat(ca(:,1:4)));
                     end
-                    if isempty(indc)
-                        assos{ii{:},io} = eye(dims(io));
+                    if isempty(ca) || isempty(ind) % no nontrivial associator
+                        F = eye(length(iabs));
+                        % NOTE if length(iabs)>1, this CAN BE WRONG 
                     else
-                        assos{ii{:},io} = ca{indc,5};
+                        F = ca{ind,5};
                     end
+                    assos(ii{:},io,ibcs,iabs) = F;
                 end
             end
         end
@@ -88,13 +99,13 @@ classdef FusionCat
             rules = C.FusionRules;
             par = string(par);
 
-            objs = cellfun(@(t)t.Data, BinaryTree.genByPar(par).leaves);
-            if any(~ismember(objs, 1:nobj))
+            mbs = BinaryTree.matchPar(par); % matched brackets
+            nb = size(mbs,2); % number of brackets
+            ins = BinaryTree.extractData(par); % input objects
+            if length(ins)~=nb+1 || any(~ismember(ins, 1:nobj))
                 error('Invalid simple object!')
             end
 
-            mbs = BinaryTree.matchPar(par); % matched brackets
-            nb = size(mbs,2); % number of brackets
             if nb<1
                 ts = {BinaryTree(str2double(par))};
             elseif nb==1
@@ -121,68 +132,74 @@ classdef FusionCat
         end
 
         function ms = Fmove(C, par, n)
+        % To generate F-matrices with basis for associative move under
+        % n-th internal node (see also BinaryTree.assoMove)
+        % ms is (nobj,3) cell array with 1st and 2nd columns for row and col
+        % basis as cellarray of BinaryTrees and 3rd column for F-matrix
             nobj = C.NSimpleObjs;
-            rules = C.FusionRules;
             assos = C.Associators;
             par = string(par);
-
-            if nargin<3 || isempty(n) % no move required
-                outs = cellfun(@(t)t.Data, C.fuse(par));
-                ms = arrayfun(@(ii)eye(nnz(outs==ii)), 1:nobj, 'UniformOutput', false);
-                return
-            end
             
-            [outpar, subs] = BinaryTree.assoMove(par, n);
-            if isempty(outpar) % not movable
+            [pn, subs] = BinaryTree.assoMove(par, n);
+            if isempty(pn) % not movable
                 ms = {};
                 return
             end
-            
-            ms = cell(nobj,1);
-            if n==1
-                ams = C.Fmove(subs(1));
-                bms = C.Fmove(subs(2));
-                cms = C.Fmove(subs(3));
-                ias = find(cellfun(@(m)~isempty(m), ams));
-                ibs = find(cellfun(@(m)~isempty(m), bms));
-                ics = find(cellfun(@(m)~isempty(m), cms));
-                iis = Utility.cartprod(ias,ibs,ics,1:nobj);
-                for ii = num2cell(iis.')
-                    F = assos{ii{:}};
-                    if ~isempty(F)
-                        ms{ii{4}} = blkdiag(ms{ii{4}},...
-                            Utility.kronall(F, ams{ii{1}}, bms{ii{2}}, cms{ii{3}}));
+            na = count(subs(1),","); % # of internal-nodes in a
+
+            ftdata = @(ts) cellfun(@(t)t.Data, ts);
+            % find data of each tree in cell array
+
+            t0s = C.fuse(par);
+            out0s = ftdata(t0s);
+            tns = C.fuse(pn);
+            outns = ftdata(tns);
+            if ~isequal(sort(out0s),sort(outns))
+                error('Something wrong with channels...')
+            end
+
+            ms = cell(nobj,3);
+            ms(:,1) = arrayfun(@(ii)tns(outns==ii), (1:nobj)', 'UniformOutput', false); % row basis
+            ms(:,2) = arrayfun(@(ii)t0s(out0s==ii), (1:nobj)', 'UniformOutput', false); % col basis
+            findata = @(io,rc) cellfun(@(t) ftdata(t.inodes), ms{io,rc}, 'UniformOutput', false);
+            % find internal node data of each tree in cell array ms{io,rc}
+            del = @(a,n) a((1:length(a))~=n);
+            for io = 1:nobj
+                if isempty(ms{io,1})
+                    continue
+                end
+                id0s = findata(io,2); % inode data of each basis tree
+                idns = findata(io,1); % organized in column cell array
+                % inode data in id0s has pattern:
+                %  ..., d_abc, d_ab, [na], [nb], [nc], ...
+                % inode data in idns has pattern:
+                %  ..., d_abc, [na], d_bc, [nb], [nc], ...
+                % where na is # of internal nodes in a,
+                % [na] is array of length na (same applies to b and c);
+                % d_abc appears as the overall n-th internal node.
+                % F-matrix is finite only between trees whose inode data
+                % differ by d_ab and d_bc only
+                dim = length(id0s);
+                m = zeros(dim);
+                for ii0 = 1:dim
+                    [~, subs] = ms{io,2}{ii0}.rot(n);
+                    abc = num2cell(ftdata(subs));
+                    id0 = id0s{ii0};
+                    for iin = 1:dim
+                        idn = idns{iin};
+                        if isequal(del(idn,n+na+1),del(id0,n+1))
+                            m(iin,ii0) = assos(abc{:},id0(n),idn(n+na+1),id0(n+1));
+                        end
                     end
                 end
-            else
-                m = BinaryTree.matchPar(par);
-                lpar = extractBetween(par,m(1,1)+1,m(3,1)-1);
-                rpar = extractBetween(par,m(3,1)+1,m(2,1)-1);
-                if m(3,n)<m(3,1)
-                    nl = n-1;
-                    nr = [];
-                else
-                    nr = n-nnz(m(1,:)<m(3,1));
-                    nl = [];
-                end
-                lms = C.Fmove(lpar, nl);
-                rms = C.Fmove(rpar, nr);
-                ils = find(cellfun(@(m)~isempty(m), lms));
-                irs = find(cellfun(@(m)~isempty(m), rms));
-                iis = Utility.cartprod(ils,irs,1:nobj);
-                for ii = num2cell(iis.')
-                    if rules(ii{:})>0
-                        ms{ii{3}} = blkdiag(ms{ii{3}}, kron(lms{ii{1}}, rms{ii{2}}));
-                    end
-                end
+                ms{io,3} = m;
             end
         end
 
-        function tf = checkPantagon(C, tol)
-            if nargin<2
-                tol = 1e-12;
-            end
+        function tf = checkPantagon(C)
             nobj = C.NSimpleObjs;
+            mul = @FusionCat.mmul;
+            iseq = @FusionCat.ismeq;
             iis = Utility.cartprod(1:nobj,1:nobj,1:nobj,1:nobj);
             p0 = BinaryTree.initPar(4);
             p1 = BinaryTree.assoMove(p0,1);
@@ -194,22 +211,10 @@ classdef FusionCat
                 dp1 = BinaryTree.dataPar(p1,ii);
                 dp2 = BinaryTree.dataPar(p2,ii);
                 dp3 = BinaryTree.dataPar(p3,ii);
-                mss = [C.Fmove(dp0,1), C.Fmove(dp0,2), C.Fmove(dp2,1),...
-                       C.Fmove(dp3,2), C.Fmove(dp1,1)];
-                for io = 1:nobj
-                    if isempty(mss{io,1})
-                        if any(cellfun(@(m)~isempty(m),mss(io,2:5)))
-                            tf = false;
-                            disp('Empty matrices do not match!')
-                            return
-                        end
-                    else
-                        if norm(mss{io,4}*mss{io,3}*mss{io,2}-mss{io,5}*mss{io,1})>tol
-                            tf = false;
-                            disp([ii{:}, io])
-                            return
-                        end
-                    end
+                if ~iseq(mul(C.Fmove(dp3,2), mul(C.Fmove(dp2,1), C.Fmove(dp0,2))),...
+                         mul(C.Fmove(dp1,1), C.Fmove(dp0,1)))
+                    tf = false;
+                    return
                 end
             end
             tf = true;
@@ -229,6 +234,73 @@ classdef FusionCat
                     rules(iit{:}) = 1;
                 end
             end
+        end
+
+        function m = mmul(m1, m2) % matrix multiplication w/ tree basis
+        % m/m1/m2 are cell array with 1st and 2nd columns for row and col
+        % basis as cell array of BinaryTrees and 3rd column for matrix
+            if ~isequal(size(m1),size(m2))
+                error('Size of input does not match!')
+            end
+            m = cell(size(m1));
+            for ii = 1:size(m1,1)
+                if isempty(m1{ii,1})
+                    m(ii,:) = cell(1,3);
+                    continue
+                end
+                m1c = cell2mat(cellfun(@(t)t.parfull, m1{ii,2}, 'UniformOutput', false));
+                m2r = cell2mat(cellfun(@(t)t.parfull, m2{ii,1}, 'UniformOutput', false));
+                p = cell2mat(arrayfun(@(s)strcmp(s,m2r'), m1c, 'UniformOutput', false));
+                d = length(m1c);
+                if ~isequal(1:d,sort((1:d)*p))
+                    error('Basis of input does not match!')
+                end
+                m(ii,:) = {m1{ii,1}, m2{ii,2}, m1{ii,3}*p*m2{ii,3}};
+            end
+        end
+
+        function tf = ismeq(m1, m2) % isequal bw matrices w/ tree basis
+            if ~isequal(size(m1),size(m2))
+                disp('Size of input does not match!')
+                tf = false;
+                return
+            end
+            for ii = 1:size(m1,1)
+                if isempty(m1{ii,1})
+                    if ~all(cellfun(@(a)isempty(a), m1(ii,:))) ||...
+                       ~all(cellfun(@(a)isempty(a), m2(ii,:)))
+                        disp('Empty entries do not match.')
+                        tf = false;
+                        return
+                    else
+                        continue
+                    end
+                end
+                m1r = cell2mat(cellfun(@(t)t.parfull, m1{ii,1}, 'UniformOutput', false));
+                m1c = cell2mat(cellfun(@(t)t.parfull, m1{ii,2}, 'UniformOutput', false));
+                m2r = cell2mat(cellfun(@(t)t.parfull, m2{ii,1}, 'UniformOutput', false));
+                m2c = cell2mat(cellfun(@(t)t.parfull, m2{ii,2}, 'UniformOutput', false));
+                pr = cell2mat(arrayfun(@(s)strcmp(s,m2r'), m1r, 'UniformOutput', false));
+                pc = cell2mat(arrayfun(@(s)strcmp(s,m2c), m1c', 'UniformOutput', false));
+                dr = length(m1r);
+                if ~isequal(1:dr,sort((1:dr)*pr))
+                    disp('Row basis does not match.')
+                    tf = false;
+                    return
+                end
+                dc = length(m1c);
+                if ~isequal(1:dc,sort((1:dc)*pc))
+                    disp('Column basis does not match.')
+                    tf = false;
+                    return
+                end
+                if ~isapprox(m1{ii,3}, pr*m2{ii,3}*pc, "tight")
+                    disp('Matrix does not match.')
+                    tf = false;
+                    return
+                end
+            end
+            tf = true;
         end
 
         function test
