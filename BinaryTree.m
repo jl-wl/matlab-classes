@@ -206,6 +206,13 @@ classdef BinaryTree < handle
             end
         end
 
+        function s = finalPar(w) % final pattern like (,(,(,)))
+            s = "";
+            for ii = 2:w
+                s = "(," + s + ")";
+            end
+        end
+
         function ss = allPar(w) % all patterns with w leaves
             if w==1
                 ss = "";
@@ -275,10 +282,16 @@ classdef BinaryTree < handle
                     "___" + extractAfter(par,m(2,n)));
         end
 
-        function ps = assoNbs(par) % neighbors by one assoMove
-            ps = [];
+        function [ps, ns] = assoNbs(par) % neighbors by one assoMove
+            ps = []; % neighboring parentheses
+            ns = []; % indices of "(" for the move
             for ii = size(BinaryTree.matchPar(par),2):-1:1
-                ps = [ps; BinaryTree.assoMove(par,ii)]; %#ok<AGROW>
+                pn = BinaryTree.assoMove(par,ii);
+                if isempty(pn)
+                    continue
+                end
+                ps = [ps; pn];
+                ns = [ns; ii];
             end
         end
 
@@ -288,15 +301,18 @@ classdef BinaryTree < handle
             map = containers.Map(nodes, 1:nn);
             s = [];
             t = [];
+            m = [];
             for ii = 1:nn
-                nbs = BinaryTree.assoNbs(nodes(ii));
-                s = [s; repelem(ii,length(nbs),1)]; %#ok<AGROW>
-                t = [t; arrayfun(@(s)map(s),nbs)]; %#ok<AGROW>
+                [nbs, mvs]  = BinaryTree.assoNbs(nodes(ii));
+                s = [s; repelem(ii,length(nbs),1)]; %#ok<*AGROW>
+                t = [t; arrayfun(@(s)map(s),nbs)];
+                m = [m; mvs];
             end
-            G = digraph(s,t,[],nodes);
+            G = digraph(s,t,m,nodes);
             if nargin>1 && show_plot
                 figure
-                plot(G,'Layout','force3')
+                h = plot(G,'Layout','force3');
+                labeledge(h,1:numedges(G),G.Edges.Weight)
             end
         end
 

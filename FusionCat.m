@@ -196,25 +196,53 @@ classdef FusionCat
             end
         end
 
+        function ms = Fpath(C, data, path, moves) % consecutive F-moves along path
+        % For input: data and moves are numeric array; path is string array.
+            l = length(path);
+            if l<1
+                warning('No path provided!')
+                ms = {};
+                return
+            elseif l>1 % check path consistency
+                if ~strcmp(path(2), BinaryTree.assoMove(path(1),moves(1)))
+                    error('Inconsistent path and moves!')
+                end
+            end
+            ms1 = C.Fmove(BinaryTree.dataPar(path(1),data), moves(1));
+            if l<=2
+                ms = ms1;
+            else
+                ms = FusionCat.mmul(C.Fpath(data,path(2:end),moves(2:end)), ms1);
+            end
+        end
+
         function tf = checkPantagon(C)
+            tf = C.checkConsistency(4);
+        end
+
+        function tf = checkConsistency(C, w, s, t)
+            if nargin<3
+                s = BinaryTree.initPar(w);
+                t = BinaryTree.finalPar(w);
+            end
+            G = BinaryTree.associahedron(w);
+            [paths, edgepaths] = allpaths(G,s,t);
+            
             nobj = C.NSimpleObjs;
-            mul = @FusionCat.mmul;
             iseq = @FusionCat.ismeq;
-            iis = Utility.cartprod(1:nobj,1:nobj,1:nobj,1:nobj);
-            p0 = BinaryTree.initPar(4);
-            p1 = BinaryTree.assoMove(p0,1);
-            p2 = BinaryTree.assoMove(p0,2);
-            p3 = BinaryTree.assoMove(p2,1);
-            % BinaryTree.assoMove(p3,2) == BinaryTree.assoMove(p1,1)
-            for ii = num2cell(iis.')
-                dp0 = BinaryTree.dataPar(p0,ii);
-                dp1 = BinaryTree.dataPar(p1,ii);
-                dp2 = BinaryTree.dataPar(p2,ii);
-                dp3 = BinaryTree.dataPar(p3,ii);
-                if ~iseq(mul(C.Fmove(dp3,2), mul(C.Fmove(dp2,1), C.Fmove(dp0,2))),...
-                         mul(C.Fmove(dp1,1), C.Fmove(dp0,1)))
-                    tf = false;
-                    return
+            inds = num2cell(repmat(1:nobj,w,1),2);
+            datas = Utility.cartprod(inds{:});
+            for data = num2cell(datas.')
+                for ip = 1:length(paths)
+                    path = paths{ip};
+                    moves = G.Edges.Weight(edgepaths{ip});
+                    ms = C.Fpath(data, path, moves);
+                    if ip==1
+                        ms0 = ms;
+                    elseif ~iseq(ms,ms0)
+                        tf = false;
+                        return
+                    end
                 end
             end
             tf = true;
@@ -306,18 +334,39 @@ classdef FusionCat
         function test
             TC = FusionCat(name='tc');
             disp(TC)
-            ttc = TC.fuse('(((1,2),3),4)');
-            celldisp(cellfun(@(c)c.rep, ttc, 'UniformOutput', false))
-
-            Is = FusionCat(name='is');
-            disp(Is)
-            tis = Is.fuse('((3,3),(3,3))');
-            celldisp(cellfun(@(c)c.rep, tis, 'UniformOutput', false))
+            disp('Simple objects are:')
+            disp({TC.SimpleObjs.label})
+            if TC.checkPantagon
+                disp('Pantagon equation checked.')
+            end
+            p = '(((1,2),3),4)';
+            ttc = TC.fuse(p);
+            disp(['Fusion channels of ', p, ' are:'])
+            cell2mat(cellfun(@(t)t.parfull, ttc, 'UniformOutput', false))
 
             Fib = FusionCat(name='fib');
             disp(Fib)
-            tfib = Fib.fuse('(((2,2),(2,2)),2)');
-            celldisp(cellfun(@(c)c.rep, tfib, 'UniformOutput', false))
+            disp('Simple objects are:')
+            disp({Fib.SimpleObjs.label})
+            if Fib.checkPantagon
+                disp('Pantagon equation checked.')
+            end
+            p = '(((2,2),(2,2)),2)';
+            tfib = Fib.fuse(p);
+            disp(['Fusion channels of ', p, ' are:'])
+            cell2mat(cellfun(@(t)t.parfull, tfib, 'UniformOutput', false))
+
+            Is = FusionCat(name='is');
+            disp(Is)
+            disp('Simple objects are:')
+            disp({Is.SimpleObjs.label})
+            if Is.checkPantagon
+                disp('Pantagon equation checked.')
+            end
+            p = '((3,3),(3,3))';
+            tis = Is.fuse(p);
+            disp(['Fusion channels of ', p, ' are:'])
+            cell2mat(cellfun(@(t)t.parfull, tis, 'UniformOutput', false))
         end
     end
 end
