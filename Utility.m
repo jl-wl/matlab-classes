@@ -399,6 +399,23 @@ classdef Utility
             end
             ind(iB) = iA;
         end
+
+        function [S, U] = Youla(A,tol) % A = U*S*U.'
+        % Youla decomposition for a complex skew-symmetric matrix
+            assert(all(isapprox(A,-A.'),'all'),...
+                   'argument does not seem skew-symmetric')
+            if nargin<2
+                tol = eps*1000;
+            end
+            [U, evals] = Utility.eigen(A*A');
+            U0 = U(:,evals<tol);
+            U = U(:,evals>=tol);
+            evals = evals(evals>=tol);
+            sigmas = diag(sqrt(evals(1:2:end)));
+            U(:,2:2:end) = -A*conj(U(:,1:2:end))/sigmas;
+            S = blkdiag(zeros(size(U0,2)),kron(sigmas,[0,1;-1,0]));
+            U = [U0, U];
+        end
         
         function [sp, p] = pf(A,U)
         % To compute the sign and value of Pfaffian of a skew-symmetric matrix
